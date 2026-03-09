@@ -1,57 +1,97 @@
-from flask import request,jsonify
+from flask import Blueprint, request, jsonify
 from app.db import db
-from run import app
 from app.models import Application
+bp = Blueprint("applications", __name__)
 
-@app.route("/applications", methods=['GET'])
+VALID_STATUSES = {"applied", "interview", "offer", "rejected"}
+
+#GET operations
+@bp.route("/applications", methods=['GET'])
 def get_applications():
-    apps= Application.query.all()
-    result=[]
-    for a in apps:
-        result.append({
-            "id": a.id,
-            "company": a.company,
-            "role": a.role,
-            "applied": a.applied,
-            "applied_at":a.applied_at,
-        })
-    return jsonify(result)
+    query = Application.query
 
-@app.route("/applications", methods=['POST'])
+    status = request.args.get("status")
+    sort = request.args.get("sort")
+
+    if status:
+        query = query.filter_by(status=status)
+
+    if sort == "applied_at":
+        query = query.order_by(Application.applied_at)
+    elif sort == "-applied_at":
+        query = query.order_by(Application.applied_at.desc())
+
+    apps = query.all()
+
+    return jsonify([a.to_dict() for a in apps])
+
+
+@bp.route("/applications/<int:id>", methods=["GET"])
+def get_application(id):
+    application = Application.query.get_or_404(id)
+    return jsonify(application.to_dict())
+
+#POST operations
+
+
+@bp.route("/applications", methods=["POST"])
 def add_application():
-    data=request.get_json()
+    data = request.get_json()
+
+    status = data.get("status", "applied")
+
+    if status not in VALID_STATUSES:
+        return {"error": "Invalid status"}, 400
+
     new_application = Application(
         company=data["company"],
         role=data["role"],
-        applied=data["applied"],
+        status=status
     )
+
     db.session.add(new_application)
     db.session.commit()
 
-    return jsonify({
-        "id": new_application.id,
-        "company": new_application.company,
-        "role": new_application.role,
-        "applied": new_application.applied,
-        "applied_at": new_application.applied_at
-    }), 201
+    return jsonify(new_application.to_dict()), 201
+
+#PUT operations
 
 
-@app.route("/applications/<int:id>", methods=['PUT'])
+
+@bp.route("/applications/<int:id>", methods=["PUT"])
 def update_application(id):
-    application=Application.query.get_or_404(id)
-    data=request.get_json()
-    application.applied=data["applied"]
+    application = Application.query.get_or_404(id)
+    data = request.get_json()
+
+    status = data.get("status")
+
+    if status not in VALID_STATUSES:
+        return {"error": "Invalid status"}, 400
+
+    application.status = status
     db.session.commit()
 
-    return jsonify({"message":"Application has been updated."})
+    return jsonify(application.to_dict())
 
+#DELETE operations
 
-@app.route("/applications/<int:id>", methods=['DELETE'])
+@bp.route("/applications/<int:id>", methods=["DELETE"])
 def delete_application(id):
-    application=Application.query.get_or_404(id)
+    application = Application.query.get_or_404(id)
+
     db.session.delete(application)
     db.session.commit()
-    return jsonify({"message": "Application has been deleted"})
 
-    
+    return {"message": "Application deleted"}
+
+@bp.route("/applications", methods=["DELETE"])
+def delete_by_status():
+    status = request.args.get("status")
+
+    if status not in VALID_STATUSES:
+        return {"error": "Provide valid status"}, 400
+
+    Application.query.filter_by(status=status).delete()
+    db.session.commit()
+
+    return {"message": f"Deleted all {status} applications"}

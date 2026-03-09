@@ -11,19 +11,33 @@ def get_applications():
     query = Application.query
 
     status = request.args.get("status")
+    if status and status not in VALID_STATUSES:
+        return {"error": "Invalid status filter"}, 400
     sort = request.args.get("sort")
 
+    #filter by status
     if status:
         query = query.filter_by(status=status)
 
+    #sort by application date
     if sort == "applied_at":
         query = query.order_by(Application.applied_at)
     elif sort == "-applied_at":
         query = query.order_by(Application.applied_at.desc())
 
-    apps = query.all()
+    #limiting and offsetting
+    limit = request.args.get("limit", type=int)
+    offset = request.args.get("offset", type=int)
 
-    return jsonify([a.to_dict() for a in apps])
+    if limit:
+        query = query.limit(limit)
+
+    if offset:
+        query = query.offset(offset)
+
+        apps = query.all()
+
+        return jsonify([a.to_dict() for a in apps])
 
 
 @bp.route("/applications/<int:id>", methods=["GET"])
@@ -33,20 +47,30 @@ def get_application(id):
 
 #POST operations
 
-
 @bp.route("/applications", methods=["POST"])
 def add_application():
     data = request.get_json()
+    if not data:
+        return {"error": "Request body must be JSON"}, 400
 
+    company = data.get("company")
+    role = data.get("role")
     status = data.get("status", "applied")
+
+    if not company or not role:
+        return {"error": "company and role are required"}, 400
+
+    if not status:
+        return {"error": "status is required"}, 400
+
 
     if status not in VALID_STATUSES:
         return {"error": "Invalid status"}, 400
 
     new_application = Application(
-        company=data["company"],
-        role=data["role"],
-        status=status
+        company=company,
+        role=role,
+        status=status,
     )
 
     db.session.add(new_application)
@@ -91,6 +115,7 @@ def delete_by_status():
     if status not in VALID_STATUSES:
         return {"error": "Provide valid status"}, 400
 
+    #filtering by status
     Application.query.filter_by(status=status).delete()
     db.session.commit()
 
